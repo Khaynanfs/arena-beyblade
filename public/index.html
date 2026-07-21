@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arena Beyblade</title>
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="cena"></canvas>
+
+<!-- ===== Menu inicial ===== -->
+<div id="tela-menu" class="tela">
+  <div class="painel menu-painel">
+    <h1>⚡ ARENA BEYBLADE ⚡</h1>
+    <p class="sub">Monte sua beyblade, desafie o time e deixe ela girando!</p>
+    <input id="inp-nome" maxlength="20" placeholder="Seu nome de Blader">
+    <button id="btn-criar" class="btn grande">Criar sala</button>
+    <button id="btn-bot" class="btn grande bot">🤖 Treinar contra Bot</button>
+    <div class="linha-entrar">
+      <input id="inp-codigo" maxlength="4" placeholder="CÓDIGO">
+      <button id="btn-entrar" class="btn">Entrar</button>
+    </div>
+    <p id="menu-erro" class="erro"></p>
+    <div class="regras">
+      <b>Regras (estilo Burst):</b> Spin Finish = 1pt · Ring-Out = 2pts · Burst = 2pts · Vence quem fizer 3 pontos.
+    </div>
+  </div>
+</div>
+
+<!-- ===== Sala / escolha de peças ===== -->
+<div id="tela-sala" class="tela oculto">
+  <div class="painel sala-painel">
+    <div class="sala-topo">
+      <div>Sala <span id="sala-codigo" class="codigo"></span></div>
+      <div id="sala-status">Aguardando oponente…</div>
+    </div>
+    <div id="picker">
+      <div class="pick-cat"><h3>Camada (define a habilidade)</h3><div id="row-layer" class="pick-row"></div></div>
+      <div class="pick-cat"><h3>Disco</h3><div id="row-disk" class="pick-row"></div></div>
+      <div class="pick-cat"><h3>Ponteira (define o movimento)</h3><div id="row-driver" class="pick-row"></div></div>
+      <div id="resumo">
+        <div id="stats-bars"></div>
+        <div id="skill-box"></div>
+      </div>
+      <button id="btn-pronto" class="btn grande">3, 2, 1… Estou pronto!</button>
+    </div>
+    <div id="espectador-aviso" class="oculto">Você está assistindo como espectador 👀</div>
+  </div>
+</div>
+
+<!-- ===== Lançamento ===== -->
+<div id="tela-lancamento" class="tela oculto">
+  <div class="painel lanc-painel">
+    <h2 id="lanc-titulo">Rodada 1</h2>
+    <p>Escolha o <b>estilo de saque</b> e aperte <b>ESPAÇO</b> (ou clique) no pico da força!</p>
+    <div id="estilos">
+      <div class="estilo-card sel" data-id="potente"><b>💥 Potente</b><span>Força total direto no adversário (+giro)</span></div>
+      <div class="estilo-card" data-id="rasante"><b>🌀 Rasante</b><span>Entra veloz em órbita pela borda (risco alto)</span></div>
+      <div class="estilo-card" data-id="central"><b>🛡️ Central</b><span>Mira o centro e prioriza estabilidade</span></div>
+    </div>
+    <div class="power-wrap"><div id="power-bar"></div></div>
+    <div id="power-num">0%</div>
+    <p id="lanc-status"></p>
+  </div>
+</div>
+
+<!-- ===== HUD da batalha ===== -->
+<div id="hud" class="oculto">
+  <div class="hud-card esq" id="card0">
+    <div class="hud-nome"></div>
+    <div class="barra spin"><div class="fill"></div></div>
+    <div class="barra burst"><div class="fill"></div></div>
+    <div class="pips"></div>
+  </div>
+  <div class="hud-card dir" id="card1">
+    <div class="hud-nome"></div>
+    <div class="barra spin"><div class="fill"></div></div>
+    <div class="barra burst"><div class="fill"></div></div>
+    <div class="pips"></div>
+  </div>
+  <div id="hud-tempo"></div>
+  <div id="hud-skill">
+    <div id="btn-skill"><span id="skill-cd"></span><span id="skill-nome"></span></div>
+    <div id="hud-dica">Habilidades disparam sozinhas — torça pela sua beyblade! 🎉</div>
+  </div>
+  <div id="anuncio"></div>
+</div>
+
+<!-- ===== Resultado ===== -->
+<div id="tela-resultado" class="tela oculto">
+  <div class="painel result-painel">
+    <h2 id="result-titulo"></h2>
+    <p id="result-sub"></p>
+    <div id="result-placar"></div>
+    <button id="btn-revanche" class="btn grande oculto">Revanche!</button>
+    <p id="revanche-status"></p>
+  </div>
+</div>
+
+<div id="conexao-erro" class="oculto">Conexão perdida. <button onclick="location.reload()">Recarregar</button></div>
+
+<script src="/parts.js"></script>
+<script type="module" src="/game.js"></script>
+</body>
+</html>
