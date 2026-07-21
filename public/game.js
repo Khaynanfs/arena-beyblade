@@ -480,6 +480,35 @@ function montarHud() {
   }
 }
 
+/* No CAOS quem criou a sala decide a hora de começar — assim ninguém que
+   ainda está entrando fica de fora da partida. */
+function atualizarBotaoComecar(humanos) {
+  const btn = $('btn-comecar'), aviso = $('aviso-caos');
+  const souAnfitriao = papel === 'jogador' && humanos.length > 0
+    && jogadores[meuIdx] && !jogadores[meuIdx].bot
+    && jogadores.findIndex(j => !j.bot) === meuIdx;
+  const mostrarBtn = modoAtual === 'caos' && souAnfitriao;
+  btn.classList.toggle('oculto', !mostrarBtn);
+  aviso.classList.toggle('oculto', modoAtual !== 'caos' || papel !== 'jogador');
+
+  const faltam = humanos.filter(j => !j.pronto);
+  const bots = Math.max(0, capAtual - humanos.length);
+  if (mostrarBtn) {
+    btn.disabled = faltam.length > 0;
+    btn.textContent = bots > 0
+      ? `▶ Começar agora (com ${bots} bot${bots > 1 ? 's' : ''})`
+      : '▶ Começar agora';
+  }
+  if (modoAtual === 'caos') {
+    aviso.textContent = faltam.length
+      ? `Aguardando ficarem prontos: ${faltam.map(j => j.nome).join(', ')}`
+      : (souAnfitriao
+        ? (bots > 0 ? `Chame mais gente com o código, ou comece já — sobram ${bots} vaga${bots > 1 ? 's' : ''} para bots.`
+          : 'Arena lotada de gente! Pode começar.')
+        : 'Prontos! Aguardando quem criou a sala começar…');
+  }
+}
+
 function atualizarPips(placar) {
   if (!placar) placar = jogadores.map(() => 0);
   jogadores.forEach((j, i) => {
@@ -548,17 +577,17 @@ function onMsg(m) {
     case 'jogadores': {
       jogadores = m.lista;
       aplicarModo(m);
-      const humanos = jogadores.filter(j => !/^Bot /.test(j.nome));
-      const lista = jogadores.map(j => j.nome + (j.pronto ? ' ✔' : '')).join(' · ');
+      const humanos = jogadores.filter(j => !j.bot);
+      const lista = humanos.map(j => j.nome + (j.pronto ? ' ✔' : '')).join(' · ');
       if (modoAtual === 'caos') {
         $('sala-status').textContent =
-          `🔥 CAOS · ${humanos.length}/${capAtual} humanos — ${lista || '—'}` +
-          (humanos.length < capAtual ? ' · os lugares vagos viram bots' : '');
+          `🔥 CAOS · ${humanos.length}/${capAtual} humanos — ${lista || '—'}`;
       } else {
         $('sala-status').textContent = jogadores.length < 2
           ? 'Aguardando oponente… compartilhe o código!'
           : `Jogadores: ${lista}`;
       }
+      atualizarBotaoComecar(humanos);
       break;
     }
     case 'faseEscolha':
@@ -568,6 +597,7 @@ function onMsg(m) {
       mostrar('tela-sala'); faseLocal = 'sala';
       $('btn-pronto').disabled = false;
       $('btn-pronto').textContent = '3, 2, 1… Estou pronto!';
+      $('btn-comecar').disabled = false;
       $('sala-status').textContent = 'Revanche! Monte sua beyblade de novo.';
       break;
     case 'faseLancamento':
@@ -667,6 +697,7 @@ function onMsg(m) {
       mostrar('tela-sala'); faseLocal = 'sala';
       $('btn-pronto').disabled = false;
       $('btn-pronto').textContent = '3, 2, 1… Estou pronto!';
+      $('btn-comecar').disabled = false;
       $('sala-status').textContent = `${m.nome} saiu da sala. Aguardando novo oponente…`;
       break;
     case 'erro':
@@ -703,7 +734,12 @@ $('btn-entrar').onclick = () => {
 $('btn-pronto').onclick = () => {
   send({ t: 'pecas', sel: minhaSel });
   $('btn-pronto').disabled = true;
-  $('btn-pronto').textContent = 'Pronto! Aguardando oponente…';
+  $('btn-pronto').textContent = modoAtual === 'caos'
+    ? 'Pronto! 🔥' : 'Pronto! Aguardando oponente…';
+};
+$('btn-comecar').onclick = () => {
+  send({ t: 'comecar' });
+  $('btn-comecar').disabled = true;
 };
 $('btn-revanche').onclick = () => { send({ t: 'revanche' }); $('btn-revanche').disabled = true; setTimeout(() => $('btn-revanche').disabled = false, 1500); };
 

@@ -190,8 +190,12 @@ class Room:
                 pass
 
     def jogadores_info(self):
-        return [{"idx": i, "nome": p.nome, "pronto": p.pronto, "sel": p.sel}
-                for i, p in enumerate(self.players)]
+        return [{"idx": i, "nome": p.nome, "pronto": p.pronto, "sel": p.sel,
+                 "bot": p.is_bot} for i, p in enumerate(self.players)]
+
+    def anfitriao(self):
+        """Quem manda na sala: o primeiro jogador de verdade."""
+        return next((p for p in self.players if not p.is_bot), None)
 
     def placar(self):
         return [p.score for p in self.players]
@@ -214,17 +218,30 @@ class Room:
             bot.pronto = True
             self.players.append(bot)
 
-    async def try_start(self):
-        if self.fase != "escolha":
-            return
+    def todos_humanos_prontos(self):
         humanos = [p for p in self.players if not p.is_bot]
-        if not humanos or not all(p.pronto for p in humanos):
+        return bool(humanos) and all(p.pronto for p in humanos)
+
+    async def try_start(self):
+        if self.fase != "escolha" or not self.todos_humanos_prontos():
             return
         if self.modo == "caos":
-            # começa assim que os humanos presentes estiverem prontos
-            self.encher_com_bots()
+            # No CAOS ficar pronto NÃO inicia sozinho: quem chegou primeiro
+            # decide a hora (botão "Começar agora"), para ninguém ficar de fora.
+            # A exceção é a arena lotada de gente — aí não há o que esperar.
+            humanos = [p for p in self.players if not p.is_bot]
+            if len(humanos) < self.cap:
+                return
         elif len(self.players) < self.cap or not all(p.pronto for p in self.players):
             return
+        await self.start_launch()
+
+    async def on_comecar(self, player):
+        """Anfitrião mandou começar: completa com bots e vai."""
+        if (self.fase != "escolha" or self.modo != "caos"
+                or self.anfitriao() is not player or not self.todos_humanos_prontos()):
+            return
+        self.encher_com_bots()
         await self.start_launch()
 
     async def start_launch(self):
@@ -849,6 +866,9 @@ async def ws_handler(request):
 
         elif t == "lancar" and player:
             await room.on_lancar(player, m.get("power", 0.7), m.get("estilo"))
+
+        elif t == "comecar" and player:
+            await room.on_comecar(player)
 
         elif t == "revanche" and player:
             await room.on_revanche(player)

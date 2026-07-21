@@ -75,6 +75,11 @@ No **CAOS** a arena entra sempre cheia: os lugares que sobrarem viram bots.
 Como ninguém é arremessado para fora, é briga até a morte — vence quem ainda
 estiver girando no final. O nome de cada jogador flutua sobre a sua beyblade.
 
+Ficar pronto no CAOS **não** inicia a partida: quem criou a sala tem o botão
+**"Começar agora"** (liberado quando todos os presentes estão prontos), para
+dar tempo do time inteiro entrar. Com os 5 lugares ocupados por gente, começa
+sozinho.
+
 ## Regras (estilo Beyblade Burst)
 
 | Final | Como acontece | Pontos |
