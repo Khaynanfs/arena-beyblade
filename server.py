@@ -664,14 +664,37 @@ class Room:
 
 
 # ---------------- HTTP / WebSocket ----------------
+def parts_body():
+    data = {"LAYERS": LAYERS, "DISKS": DISKS, "DRIVERS": DRIVERS}
+    return "window.PARTS = " + json.dumps(data, ensure_ascii=False) + ";"
+
+
+def build_page():
+    """Monta a página inteira (HTML + CSS + JS) numa resposta só.
+
+    Em hospedagem free a instância hiberna, e durante o retorno o roteador
+    responde 404 em parte das requisições paralelas — o que quebrava a página
+    (CSS/JS faltando). Com tudo embutido, uma requisição basta para o jogo subir.
+    """
+    esc = lambda s: s.replace("</script>", "<\\/script>")
+    html = (PUBLIC / "index.html").read_text(encoding="utf-8")
+    css = (PUBLIC / "style.css").read_text(encoding="utf-8")
+    js = (PUBLIC / "game.js").read_text(encoding="utf-8")
+    html = html.replace('<link rel="stylesheet" href="/style.css">',
+                        f"<style>\n{css}\n</style>")
+    html = html.replace('<script src="/parts.js"></script>',
+                        f"<script>\n{esc(parts_body())}\n</script>")
+    html = html.replace('<script type="module" src="/game.js"></script>',
+                        f'<script type="module">\n{esc(js)}\n</script>')
+    return html
+
+
 async def index(request):
-    return web.FileResponse(PUBLIC / "index.html")
+    return web.Response(text=build_page(), content_type="text/html")
 
 
 async def parts_js(request):
-    data = {"LAYERS": LAYERS, "DISKS": DISKS, "DRIVERS": DRIVERS}
-    body = "window.PARTS = " + json.dumps(data, ensure_ascii=False) + ";"
-    return web.Response(text=body, content_type="application/javascript")
+    return web.Response(text=parts_body(), content_type="application/javascript")
 
 
 async def ws_handler(request):
