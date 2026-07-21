@@ -28,8 +28,16 @@ POCKET_HALF = 0.30     # meia-largura angular de cada bolsão (rad)
 MAX_VEL = 18.0
 MAX_SPIN = 1000.0
 ROUND_TIME = 90.0      # limite de tempo da rodada (s)
-WIN_SCORE = 3          # primeiro a 3 pontos vence (regra Burst)
 SKILL_CD = 6.0         # cooldown da habilidade (s)
+
+# Modalidades:
+#   duelo — 1x1 clássico, com ring-out pelos bolsões, primeiro a 3 pontos
+#   caos  — 5 beyblades juntas, parede sólida (ring-out impossível):
+#           é briga até a morte, sobrevive quem ficar girando por último
+MODOS = {
+    "duelo": {"tops": 2, "alvo": 3, "ringout": True, "raio": 4.2},
+    "caos":  {"tops": 5, "alvo": 2, "ringout": False, "raio": 6.4},
+}
 
 # ---------------- Peças ----------------
 # Cada peça tem: atk, def, sta (estamina), wgt (peso), spd (velocidade), br (resistência a burst)
@@ -153,16 +161,23 @@ class Player:
 
 
 class Room:
-    def __init__(self, codigo):
+    def __init__(self, codigo, modo="duelo"):
         self.codigo = codigo
-        self.players = []       # até 2
+        self.modo = modo if modo in MODOS else "duelo"
+        self.cfg = MODOS[self.modo]
+        self.players = []       # até cfg["tops"]
         self.espectadores = []  # websockets
         self.fase = "escolha"
         self.rodada = 0
         self.time = 0.0
         self.tops = None
         self.task = None
-        self.last_hit = -1.0
+        self.last_hit = {}      # cooldown de impacto por par de beyblades
+        self.ultima_causa = None
+
+    @property
+    def cap(self):
+        return self.cfg["tops"]
 
     # ---- comunicação ----
     async def broadcast(self, msg):
@@ -179,17 +194,38 @@ class Room:
                 for i, p in enumerate(self.players)]
 
     def placar(self):
-        return [p.score for p in self.players] + [0] * (2 - len(self.players))
+        return [p.score for p in self.players]
+
+    def info_sala(self):
+        return {"modo": self.modo, "cap": self.cap, "alvo": self.cfg["alvo"]}
 
     async def send_lobby(self):
         await self.broadcast({"t": "jogadores", "lista": self.jogadores_info(),
-                              "espectadores": len(self.espectadores)})
+                              "espectadores": len(self.espectadores),
+                              **self.info_sala()})
 
     # ---- fluxo de partida ----
+    def encher_com_bots(self):
+        """No CAOS a arena sempre entra cheia: os lugares vagos viram bots."""
+        while len(self.players) < self.cap:
+            nome = f"{random.choice(BOT_NOMES)} {len(self.players)}"
+            bot = Player(None, nome, is_bot=True)
+            bot.sel = random_sel()
+            bot.pronto = True
+            self.players.append(bot)
+
     async def try_start(self):
-        if (self.fase == "escolha" and len(self.players) == 2
-                and all(p.pronto for p in self.players)):
-            await self.start_launch()
+        if self.fase != "escolha":
+            return
+        humanos = [p for p in self.players if not p.is_bot]
+        if not humanos or not all(p.pronto for p in humanos):
+            return
+        if self.modo == "caos":
+            # começa assim que os humanos presentes estiverem prontos
+            self.encher_com_bots()
+        elif len(self.players) < self.cap or not all(p.pronto for p in self.players):
+            return
+        await self.start_launch()
 
     async def start_launch(self):
         self.fase = "lancamento"
@@ -201,7 +237,8 @@ class Room:
                             "estilo": random.choice(ESTILOS)}
         await self.broadcast({"t": "faseLancamento", "rodada": self.rodada,
                               "placar": self.placar(),
-                              "jogadores": self.jogadores_info()})
+                              "jogadores": self.jogadores_info(),
+                              **self.info_sala()})
         self.task = asyncio.create_task(self._launch_timeout())
 
     async def _launch_timeout(self):
@@ -227,36 +264,44 @@ class Room:
                 self.task.cancel()
             await self.start_battle()
 
+    def start_pos(self, idx, n, raio):
+        """Distribui as beyblades em círculo (vale para 2 ou para 5)."""
+        ang = 2 * math.pi * idx / n + (0.0 if n == 2 else math.pi / 2)
+        return raio * math.cos(ang), raio * math.sin(ang)
+
     def make_top(self, idx, player):
         st = compute_stats(player.sel)
-        side = -1 if idx == 0 else 1
+        n = len(self.players)
         launch = player.launch or {"power": 0.7, "estilo": "potente"}
         power = launch["power"]
         estilo = launch.get("estilo", "potente")
-        spin_dir = 1 if idx == 0 else -1
+        spin_dir = 1 if idx % 2 == 0 else -1
         spin = MAX_SPIN * (0.70 + 0.30 * power)
-        x, z = side * 4.2, random.uniform(-1.5, 1.5)
+        x, z = self.start_pos(idx, n, self.cfg["raio"])
         orbit_until, cent_mult = 0.0, 1.0
+
+        r = math.hypot(x, z) or 1e-6
+        inx, inz = -x / r, -z / r          # aponta para o centro
+        tgx, tgz = -z / r, x / r           # tangente (órbita)
 
         if estilo == "rasante":
             # saque em rasante: entra veloz pela borda, girando em órbita larga
             spin *= 0.92
-            x, z = side * 6.5, random.uniform(-1.0, 1.0)
-            r = math.hypot(x, z) or 1e-6
+            x, z = x * 1.35, z * 1.35
             spd = 5.5 + 6.5 * power
-            vx = -z / r * spd * spin_dir
-            vz = x / r * spd * spin_dir
+            vx, vz = tgx * spd * spin_dir, tgz * spd * spin_dir
             orbit_until = 10.0
         elif estilo == "central":
             # saque central: entra devagar mirando o centro, prioriza estabilidade
-            vx = -side * (2.0 + 2.5 * power)
-            vz = -z * 0.3
+            spd = 2.0 + 2.5 * power
+            vx, vz = inx * spd, inz * spd
             cent_mult = 1.35
         else:
-            # saque potente: força total direto no adversário
+            # saque potente: força total rumo ao miolo da arena
             spin *= 1.05
-            vx = -side * (4.0 + 6.0 * power)
-            vz = random.uniform(-2.5, 2.5)
+            spd = 4.0 + 6.0 * power
+            vx = inx * spd + tgx * random.uniform(-1.5, 1.5)
+            vz = inz * spd + tgz * random.uniform(-1.5, 1.5)
 
         return {
             "idx": idx, "st": st, "x": x, "z": z, "vx": vx, "vz": vz,
@@ -274,11 +319,18 @@ class Room:
         print(f"[{self.codigo}] startBattle r{self.rodada} fase={self.fase}", flush=True)
         self.fase = "batalha"
         self.time = 0.0
-        self.last_hit = -1.0
+        self.last_hit = {}
+        self.ultima_causa = None
         self.tops = [self.make_top(i, p) for i, p in enumerate(self.players)]
+        # Com a arena lotada cada beyblade colide ~(n-1)x mais. Sem compensar,
+        # o burst enche em segundos e a rodada acaba antes de começar.
+        rivais = max(1, len(self.tops) - 1)
+        self.dano_mult = 1.0 if rivais <= 1 else 0.55
+        self.burst_mult = 1.0 / rivais
         await self.broadcast({"t": "inicioBatalha", "rodada": self.rodada,
                               "placar": self.placar(),
-                              "jogadores": self.jogadores_info()})
+                              "jogadores": self.jogadores_info(),
+                              **self.info_sala()})
         self.task = asyncio.create_task(self._battle_loop())
 
     async def _battle_loop(self):
@@ -290,12 +342,24 @@ class Room:
             pass
 
     # ---- física ----
+    def alvo_mais_proximo(self, t):
+        """Adversário vivo mais perto — é quem a beyblade caça."""
+        melhor, md = None, 1e9
+        for o in self.tops:
+            if o is t or not o["alive"]:
+                continue
+            d = math.hypot(o["x"] - t["x"], o["z"] - t["z"])
+            if d < md:
+                melhor, md = o, d
+        return melhor
+
     async def step(self):
         self.time += DT
-        a, b = self.tops
         for t in self.tops:
             await self.step_top(t)
-        await self.collide(a, b)
+        for i in range(len(self.tops)):
+            for j in range(i + 1, len(self.tops)):
+                await self.collide(self.tops[i], self.tops[j])
         for t in self.tops:
             await self.maybe_skill(t)
 
@@ -310,20 +374,25 @@ class Room:
                     t["causa"] = "burst"
                     await self.broadcast({"t": "burst", "idx": t["idx"],
                                           "x": t["x"], "z": t["z"]})
+                if not t["alive"]:
+                    self.ultima_causa = t["causa"]
 
         await self.broadcast(self.estado())
 
-        mortos = [t for t in self.tops if not t["alive"]]
-        if mortos:
+        vivos = [t for t in self.tops if t["alive"]]
+        if len(vivos) <= 1:
             await self.end_round()
         elif self.time >= ROUND_TIME:
-            ra, rb = a["spin"] / a["max_spin"], b["spin"] / b["max_spin"]
-            if abs(ra - rb) < 0.02:
+            # no fim do tempo sobrevive quem tiver mais rotação
+            vivos.sort(key=lambda t: t["spin"] / t["max_spin"], reverse=True)
+            if len(vivos) >= 2 and abs(vivos[0]["spin"] / vivos[0]["max_spin"]
+                                       - vivos[1]["spin"] / vivos[1]["max_spin"]) < 0.02:
                 await self.end_round(empate=True)
             else:
-                perdedor = a if ra < rb else b
-                perdedor["alive"] = False
-                perdedor["causa"] = "tempo"
+                for perdedor in vivos[1:]:
+                    perdedor["alive"] = False
+                    perdedor["causa"] = "tempo"
+                self.ultima_causa = "tempo"
                 await self.end_round()
 
     async def step_top(self, t):
@@ -358,8 +427,8 @@ class Room:
         # investidas periódicas: as beyblades se caçam pela arena
         if self.time >= t["lunge_at"]:
             t["lunge_at"] = self.time + random.uniform(1.0, 2.2)
-            o = self.tops[1 - t["idx"]]
-            if o["alive"]:
+            o = self.alvo_mais_proximo(t)
+            if o:
                 dx, dz = o["x"] - t["x"], o["z"] - t["z"]
                 dd = math.hypot(dx, dz) or 1e-6
                 imp = (3.5 + st["dmg_mul"] * 2.0) * (0.5 + 0.5 * spin_ratio)
@@ -368,11 +437,12 @@ class Room:
 
         # habilidade: investida
         if t["dash_until"] > self.time:
-            o = self.tops[1 - t["idx"]]
-            dx, dz = o["x"] - t["x"], o["z"] - t["z"]
-            d = math.hypot(dx, dz) or 1e-6
-            ax += dx / d * 48
-            az += dz / d * 48
+            o = self.alvo_mais_proximo(t)
+            if o:
+                dx, dz = o["x"] - t["x"], o["z"] - t["z"]
+                d = math.hypot(dx, dz) or 1e-6
+                ax += dx / d * 48
+                az += dz / d * 48
 
         # amortecimento de translação + teto de velocidade
         damp = max(0.0, 1 - 0.55 * DT)
@@ -397,20 +467,22 @@ class Room:
             nx2, nz2 = t["x"] / r2, t["z"] / r2
             vr = t["vx"] * nx2 + t["vz"] * nz2
             if vr > 0:
-                ang = math.atan2(t["z"], t["x"])
-                no_bolsao = any(
-                    abs((ang - p + math.pi) % (2 * math.pi) - math.pi) < POCKET_HALF
-                    for p in POCKETS)
-                limite = RINGOUT_V * (0.75 + st["mass"] * 0.18)
-                limite *= 0.78 if no_bolsao else 1.7
-                if t["shield_until"] > self.time:
-                    limite += 3.0
-                if vr > limite:
-                    t["alive"] = False
-                    t["causa"] = "out"
-                    await self.broadcast({"t": "ringout", "idx": t["idx"],
-                                          "vx": t["vx"], "vz": t["vz"]})
-                    return
+                # No CAOS a parede é sólida: ninguém sai da arena, é briga até a morte
+                if self.cfg["ringout"]:
+                    ang = math.atan2(t["z"], t["x"])
+                    no_bolsao = any(
+                        abs((ang - p + math.pi) % (2 * math.pi) - math.pi) < POCKET_HALF
+                        for p in POCKETS)
+                    limite = RINGOUT_V * (0.75 + st["mass"] * 0.18)
+                    limite *= 0.78 if no_bolsao else 1.7
+                    if t["shield_until"] > self.time:
+                        limite += 3.0
+                    if vr > limite:
+                        t["alive"] = False
+                        t["causa"] = "out"
+                        await self.broadcast({"t": "ringout", "idx": t["idx"],
+                                              "vx": t["vx"], "vz": t["vz"]})
+                        return
                 t["vx"] -= nx2 * vr * 1.7
                 t["vz"] -= nz2 * vr * 1.7
                 # cavalga a parede no sentido do próprio giro
@@ -444,9 +516,10 @@ class Room:
         b["z"] += nz * overlap * (ma / tot)
 
         rel = (a["vx"] - b["vx"]) * nx + (a["vz"] - b["vz"]) * nz
-        if rel <= 0 or self.time - self.last_hit < 0.07:
+        par = (min(a["idx"], b["idx"]), max(a["idx"], b["idx"]))
+        if rel <= 0 or self.time - self.last_hit.get(par, -1.0) < 0.07:
             return
-        self.last_hit = self.time
+        self.last_hit[par] = self.time
 
         qa = 2.2 if a["quake_until"] > self.time else 1.0
         qb = 2.2 if b["quake_until"] > self.time else 1.0
@@ -479,7 +552,7 @@ class Room:
         b["vz"] -= nx * surf * 0.5
 
         # dano à rotação
-        base = rel * 7.0
+        base = rel * 7.0 * self.dano_mult
         dmg_b = base * a["st"]["dmg_mul"] * b["st"]["dmg_taken"] * qa
         dmg_a = base * b["st"]["dmg_mul"] * a["st"]["dmg_taken"] * qb
         if shield_b:
@@ -496,8 +569,9 @@ class Room:
         b["spin"] -= dmg_b
 
         # medidor de burst
-        a["burst"] += base * b["st"]["dmg_mul"] * a["st"]["burst_taken"] * 0.24 * qb
-        b["burst"] += base * a["st"]["dmg_mul"] * b["st"]["burst_taken"] * 0.24 * qa
+        bm = 0.24 * self.burst_mult
+        a["burst"] += base * b["st"]["dmg_mul"] * a["st"]["burst_taken"] * bm * qb
+        b["burst"] += base * a["st"]["dmg_mul"] * b["st"]["burst_taken"] * bm * qa
 
         # maré esmagadora é consumida no impacto
         if qa > 1:
@@ -528,8 +602,8 @@ class Room:
         """Habilidades disparam sozinhas quando a situação favorece (com sorte)."""
         if self.fase != "batalha" or not t["alive"] or self.time < t["skill_ready"]:
             return
-        o = self.tops[1 - t["idx"]]
-        if not o["alive"]:
+        o = self.alvo_mais_proximo(t)
+        if not o:
             return
         d = math.hypot(o["x"] - t["x"], o["z"] - t["z"])
         sid = t["st"]["skill"]["id"]
@@ -574,7 +648,6 @@ class Room:
         if self.fase != "batalha":
             return
         self.fase = "fimRodada"
-        a, b = self.tops
         vencedor = None
         causa = "empate"
         pontos = 0
@@ -582,25 +655,30 @@ class Room:
             vivos = [t for t in self.tops if t["alive"]]
             if len(vivos) == 1:
                 v = vivos[0]
-                perdedor = self.tops[1 - v["idx"]]
                 vencedor = v["idx"]
-                causa = perdedor["causa"]
-                pontos = {"spin": 1, "tempo": 1, "out": 2, "burst": 2}.get(causa, 1)
+                causa = self.ultima_causa or "spin"
+                if self.modo == "caos":
+                    causa = "ultimo"     # sobreviveu ao massacre
+                    pontos = 1
+                else:
+                    pontos = {"spin": 1, "tempo": 1, "out": 2,
+                              "burst": 2}.get(causa, 1)
                 self.players[vencedor].score += pontos
             else:
-                causa = "empate"  # os dois caíram no mesmo tick
+                causa = "empate"  # todas caíram no mesmo tick
         print(f"[{self.codigo}] fimRodada r{self.rodada} vencedor={vencedor} "
               f"causa={causa} pontos={pontos} placar={self.placar()}", flush=True)
         await self.broadcast({"t": "fimRodada", "vencedor": vencedor,
                               "causa": causa, "pontos": pontos,
                               "placar": self.placar(),
-                              "tempo": round(self.time, 1)})
+                              "tempo": round(self.time, 1),
+                              **self.info_sala()})
         self.task = asyncio.create_task(self._apos_rodada())
 
     async def _apos_rodada(self):
         await asyncio.sleep(4.5)
         campeao = next((i for i, p in enumerate(self.players)
-                        if p.score >= WIN_SCORE), None)
+                        if p.score >= self.cfg["alvo"]), None)
         print(f"[{self.codigo}] aposRodada placar={self.placar()} campeao={campeao}",
               flush=True)
         if campeao is not None:
@@ -619,7 +697,7 @@ class Room:
         player.revanche = True
         await self.broadcast({"t": "revancheStatus",
                               "prontos": sum(1 for p in self.players if p.revanche)})
-        if len(self.players) == 2 and all(p.revanche for p in self.players):
+        if all(p.revanche for p in self.players):
             for p in self.players:
                 p.score = 0
                 p.pronto = False
@@ -630,7 +708,8 @@ class Room:
             self.rodada = 0
             self.fase = "escolha"
             await self.broadcast({"t": "faseEscolha",
-                                  "jogadores": self.jogadores_info()})
+                                  "jogadores": self.jogadores_info(),
+                                  **self.info_sala()})
             await self.send_lobby()
 
     async def remove_ws(self, ws):
@@ -714,11 +793,11 @@ async def ws_handler(request):
 
         if t in ("criar", "criarBot"):
             codigo = new_code()
-            room = Room(codigo)
+            room = Room(codigo, str(m.get("modo", "duelo")))
             rooms[codigo] = room
             player = Player(ws, str(m.get("nome", "")))
             room.players.append(player)
-            if t == "criarBot":
+            if t == "criarBot" and room.modo == "duelo":
                 bot = Player(None, random.choice(BOT_NOMES), is_bot=True)
                 bot.sel = random_sel()
                 bot.pronto = True
@@ -726,7 +805,7 @@ async def ws_handler(request):
             await ws.send_json({"t": "sala", "codigo": codigo, "papel": "jogador",
                                 "idx": 0, "fase": room.fase,
                                 "jogadores": room.jogadores_info(),
-                                "placar": room.placar()})
+                                "placar": room.placar(), **room.info_sala()})
             await room.send_lobby()
 
         elif t == "entrar":
@@ -736,7 +815,14 @@ async def ws_handler(request):
                 await ws.send_json({"t": "erro", "msg": "Sala não encontrada. Confira o código."})
                 room = None
                 continue
-            if len(room.players) < 2 and room.fase == "escolha":
+            humanos = sum(1 for p in room.players if not p.is_bot)
+            if humanos < room.cap and room.fase == "escolha":
+                # no CAOS um bot cede o lugar quando chega gente de verdade
+                if len(room.players) >= room.cap:
+                    for i, p in enumerate(room.players):
+                        if p.is_bot:
+                            room.players.pop(i)
+                            break
                 player = Player(ws, str(m.get("nome", "")))
                 room.players.append(player)
                 papel, idx = "jogador", len(room.players) - 1
@@ -746,7 +832,7 @@ async def ws_handler(request):
             await ws.send_json({"t": "sala", "codigo": codigo, "papel": papel,
                                 "idx": idx, "fase": room.fase,
                                 "jogadores": room.jogadores_info(),
-                                "placar": room.placar()})
+                                "placar": room.placar(), **room.info_sala()})
             await room.send_lobby()
 
         elif room is None:

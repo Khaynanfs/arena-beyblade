@@ -6,6 +6,7 @@ const ARENA_R = 9, TOP_R = 0.95, ROUND_TIME = 90;
 const bowlY = (r) => 0.9 * (r / ARENA_R) ** 2 - 0.9;
 
 const NOMES_CAUSA = {
+  ultimo: { titulo: 'ÚLTIMO DE PÉ! 🔥', desc: 'Sobreviveu ao massacre da arena', pts: 1 },
   spin:  { titulo: 'SPIN FINISH!',  desc: 'A beyblade adversária parou de girar', pts: 1 },
   tempo: { titulo: 'TEMPO ESGOTADO!', desc: 'Venceu quem tinha mais rotação', pts: 1 },
   out:   { titulo: 'RING-OUT FINISH!', desc: 'Beyblade arremessada para fora da arena', pts: 2 },
@@ -58,6 +59,7 @@ const p2 = new THREE.PointLight(0x3f6fd1, 22, 30); p2.position.set(8, 7, 0); sce
 
 // Estádio estilo Beystadium: tigela branca com faixas impressas, emblema e bolsões
 const POCKET_ANGS = [Math.PI / 2, Math.PI / 2 + 2 * Math.PI / 3, Math.PI / 2 - 2 * Math.PI / 3];
+const pocketMeshes = [];
 {
   // textura "impressa" da tigela (faixas concêntricas azuis sobre plástico claro)
   const tc = document.createElement('canvas'); tc.width = 16; tc.height = 1024;
@@ -77,6 +79,7 @@ const POCKET_ANGS = [Math.PI / 2, Math.PI / 2 + 2 * Math.PI / 3, Math.PI / 2 - 2
   faixa(0.80, 1.00, '#3f6fd1');   // parede azul
   faixa(0.965, 1.00, '#e8eef8');  // topo da parede
   const bowlTex = new THREE.CanvasTexture(tc);
+  bowlTex.colorSpace = THREE.SRGBColorSpace;
 
   const pts = [];
   for (let r = 0; r <= ARENA_R; r += 0.75) pts.push(new THREE.Vector2(r, bowlY(r)));
@@ -98,9 +101,11 @@ const POCKET_ANGS = [Math.PI / 2, Math.PI / 2 + 2 * Math.PI / 3, Math.PI / 2 - 2
     eg.lineTo(Math.cos(a) * 88, Math.sin(a) * 88); eg.stroke();
   }
   circ(42, '#e0452b'); circ(20, '#eef2f8');
+  const embTex = new THREE.CanvasTexture(ec);
+  embTex.colorSpace = THREE.SRGBColorSpace;
   const emblema = new THREE.Mesh(
     new THREE.CircleGeometry(1.6, 40),
-    new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(ec), roughness: 0.55 }));
+    new THREE.MeshStandardMaterial({ map: embTex, roughness: 0.55 }));
   emblema.rotation.x = -Math.PI / 2; emblema.position.y = bowlY(0) + 0.015; scene.add(emblema);
 
   // 3 bolsões de ring-out na parede (vermelhos, como no estádio Burst)
@@ -110,6 +115,7 @@ const POCKET_ANGS = [Math.PI / 2, Math.PI / 2 + 2 * Math.PI / 3, Math.PI / 2 - 2
       new THREE.CylinderGeometry(9.28, 9.28, 0.6, 24, 1, true, theta - 0.3, 0.6),
       new THREE.MeshStandardMaterial({ color: 0xe0452b, side: THREE.DoubleSide, roughness: 0.5, emissive: 0xe0452b, emissiveIntensity: 0.25 }));
     seg.position.y = 0.4; scene.add(seg);
+    pocketMeshes.push(seg);
   }
 
   // aro luminoso e base do estádio
@@ -125,6 +131,29 @@ const POCKET_ANGS = [Math.PI / 2, Math.PI / 2 + 2 * Math.PI / 3, Math.PI / 2 - 2
     new THREE.CircleGeometry(45, 48),
     new THREE.MeshStandardMaterial({ color: 0x151d33, roughness: 1 }));
   floor.rotation.x = -Math.PI / 2; floor.position.y = -2.02; scene.add(floor);
+}
+
+/* ---- etiqueta com o nome do jogador, flutuando sobre a beyblade ---- */
+const CORES_JOGADOR = ['#ff6a5c', '#6fb4ff', '#5fe0a0', '#ffc95c', '#c890ff'];
+
+function makeLabel(nome, corCss) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const g = c.getContext('2d');
+  g.font = 'bold 62px "Segoe UI", system-ui, sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.lineWidth = 12; g.lineJoin = 'round';
+  g.strokeStyle = 'rgba(0,0,0,.9)'; g.strokeText(nome, 256, 64);
+  g.fillStyle = corCss; g.fillText(nome, 256, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;   // senão as cores saem lavadas
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthTest: false,
+  }));
+  spr.scale.set(3.2, 0.8, 1);
+  spr.position.y = 1.75;
+  spr.renderOrder = 999;
+  return spr;
 }
 
 /* ---- construção das beyblades ---- */
@@ -165,14 +194,14 @@ function makeTopMesh(sel) {
 }
 
 /* ---- estado visual da batalha ---- */
-let tops = [null, null];          // {outer,tilt,inner,cor, alvo:{x,z}, spinRatio, morto, anim}
+let tops = [];                    // {outer,tilt,inner,cor, alvo:{x,z}, spinRatio, morto, anim}
 let serverState = null;
 let shake = 0;
 const efeitos = [];               // particulas / fragmentos
 
 function limparBatalha() {
   for (const t of tops) if (t) scene.remove(t.outer);
-  tops = [null, null];
+  tops = [];
   serverState = null;
   for (const e of efeitos) scene.remove(e.obj);
   efeitos.length = 0;
@@ -180,16 +209,25 @@ function limparBatalha() {
 
 function criarTops(jogadores) {
   limparBatalha();
+  const n = jogadores.length;
+  const raio = n <= 2 ? 4.2 : 6.4;
   jogadores.forEach((j, i) => {
     if (!j.sel) return;
     const t = makeTopMesh(j.sel);
-    t.alvo = { x: i === 0 ? -4.2 : 4.2, z: 0 };
-    t.spinRatio = 1; t.morto = false; t.anim = null; t.spinDir = i === 0 ? 1 : -1;
-    t.outer.position.set(t.alvo.x, bowlY(4.2) + 0.1, 0);
+    // mesma distribuição em círculo que o servidor usa
+    const ang = 2 * Math.PI * i / n + (n === 2 ? 0 : Math.PI / 2);
+    t.alvo = { x: raio * Math.cos(ang), z: raio * Math.sin(ang) };
+    t.spinRatio = 1; t.morto = false; t.anim = null;
+    t.spinDir = i % 2 === 0 ? 1 : -1;
+    t.outer.position.set(t.alvo.x, bowlY(raio) + 0.1, t.alvo.z);
+    t.label = makeLabel(j.nome, corJogador(i));
+    t.outer.add(t.label);
     scene.add(t.outer);
     tops[i] = t;
   });
 }
+
+function corJogador(i) { return CORES_JOGADOR[i % CORES_JOGADOR.length]; }
 
 function particulas(x, z, cor = 0xffb347, n = 14, vel = 5) {
   const g = new THREE.BufferGeometry();
@@ -297,6 +335,15 @@ let minhaSel = { layer: 'dragao', disk: 'tita', driver: 'agulha' };
 let skillInfo = null, skillCd = 0;
 let launchLock = false, launchAnim = null;
 let estiloSel = 'potente';
+let modoAtual = 'duelo', alvoAtual = 3, capAtual = 2;
+
+function aplicarModo(m) {
+  if (m.modo) modoAtual = m.modo;
+  if (m.alvo) alvoAtual = m.alvo;
+  if (m.cap) capAtual = m.cap;
+  // no CAOS a parede é sólida: os bolsões de ring-out somem da arena
+  for (const p of pocketMeshes) p.visible = modoAtual !== 'caos';
+}
 
 const telas = ['tela-menu', 'tela-sala', 'tela-lancamento', 'tela-resultado'];
 function mostrar(tela) {
@@ -405,11 +452,24 @@ for (const card of document.querySelectorAll('.estilo-card')) {
 
 /* ---- HUD ---- */
 function montarHud() {
+  const cont = $('hud-cards');
+  const caos = modoAtual === 'caos';
+  cont.className = caos ? 'caos' : 'duelo';
+  cont.innerHTML = '';
   jogadores.forEach((j, i) => {
-    const card = $('card' + i);
+    const card = document.createElement('div');
+    card.id = 'card' + i;
+    card.className = 'hud-card' + (caos ? '' : (i === 0 ? ' esq' : ' dir'));
+    card.style.borderLeftColor = corJogador(i);
+    if (!caos) card.style[i === 0 ? 'borderLeftColor' : 'borderRightColor'] = corJogador(i);
+    card.innerHTML = `<div class="hud-nome"></div>
+      <div class="barra spin"><div class="fill"></div></div>
+      <div class="barra burst"><div class="fill"></div></div>
+      <div class="pips"></div>`;
     card.querySelector('.hud-nome').textContent = (i === meuIdx ? '⭐ ' : '') + j.nome;
-    const pips = card.querySelector('.pips'); pips.innerHTML = '';
-    for (let k = 0; k < 3; k++) pips.innerHTML += `<div class="pip"></div>`;
+    const pips = card.querySelector('.pips');
+    for (let k = 0; k < alvoAtual; k++) pips.innerHTML += `<div class="pip"></div>`;
+    cont.appendChild(card);
   });
   atualizarPips();
   const souJogador = papel === 'jogador' && meuIdx >= 0;
@@ -423,22 +483,25 @@ function montarHud() {
 function atualizarPips(placar) {
   if (!placar) placar = jogadores.map(() => 0);
   jogadores.forEach((j, i) => {
-    const pips = $('card' + i).querySelectorAll('.pip');
-    pips.forEach((p, k) => p.classList.toggle('on', k < (placar[i] || 0)));
+    const card = $('card' + i); if (!card) return;
+    card.querySelectorAll('.pip').forEach((p, k) => p.classList.toggle('on', k < (placar[i] || 0)));
   });
 }
 
 function hudEstado(msg) {
   msg.tops.forEach((st, i) => {
     const card = $('card' + i);
+    if (!card) return;
     card.querySelector('.spin .fill').style.width = (st.s * 100) + '%';
     card.querySelector('.burst .fill').style.width = (st.b * 100) + '%';
+    card.classList.toggle('fora', !st.a);
     const tp = tops[i];
     if (tp) {
       tp.alvo.x = st.x; tp.alvo.z = st.z;
       tp.spinRatio = st.s;
       if (!st.a && !tp.morto && !tp.anim) {
         tp.morto = true; // spin/tempo finish: tomba no lugar
+        if (tp.label) tp.label.material.opacity = 0.35;
         const dir = Math.random() > 0.5 ? 1 : -1;
         let prog = 0;
         tp.anim = (dt) => {
@@ -465,6 +528,7 @@ function onMsg(m) {
   switch (m.t) {
     case 'sala':
       papel = m.papel; meuIdx = m.idx;
+      aplicarModo(m);
       $('sala-codigo').textContent = m.codigo;
       $('picker').classList.toggle('oculto', papel !== 'jogador');
       $('espectador-aviso').classList.toggle('oculto', papel === 'jogador');
@@ -483,15 +547,23 @@ function onMsg(m) {
     case 'reidx': meuIdx = m.idx; break;
     case 'jogadores': {
       jogadores = m.lista;
-      const n = jogadores.length;
-      const prontos = jogadores.filter(j => j.pronto).length;
-      $('sala-status').textContent =
-        n < 2 ? 'Aguardando oponente… compartilhe o código!'
-          : `Jogadores: ${jogadores.map(j => j.nome + (j.pronto ? ' ✔' : '')).join(' × ')} (${prontos}/2 prontos)`;
+      aplicarModo(m);
+      const humanos = jogadores.filter(j => !/^Bot /.test(j.nome));
+      const lista = jogadores.map(j => j.nome + (j.pronto ? ' ✔' : '')).join(' · ');
+      if (modoAtual === 'caos') {
+        $('sala-status').textContent =
+          `🔥 CAOS · ${humanos.length}/${capAtual} humanos — ${lista || '—'}` +
+          (humanos.length < capAtual ? ' · os lugares vagos viram bots' : '');
+      } else {
+        $('sala-status').textContent = jogadores.length < 2
+          ? 'Aguardando oponente… compartilhe o código!'
+          : `Jogadores: ${lista}`;
+      }
       break;
     }
     case 'faseEscolha':
       jogadores = m.jogadores;
+      aplicarModo(m);
       limparBatalha();
       mostrar('tela-sala'); faseLocal = 'sala';
       $('btn-pronto').disabled = false;
@@ -500,17 +572,20 @@ function onMsg(m) {
       break;
     case 'faseLancamento':
       jogadores = m.jogadores;
-      atualizarPips(m.placar);
+      aplicarModo(m);
       iniciarLancamento(m.rodada);
       break;
     case 'inicioBatalha':
       jogadores = m.jogadores;
+      aplicarModo(m);
       faseLocal = 'batalha';
       criarTops(jogadores);
       montarHud();
       atualizarPips(m.placar);
       mostrar(null);
-      anunciar('LET IT RIP! 🌀', 1500);
+      anunciar(modoAtual === 'caos'
+        ? '🔥 CAOS! 5 NA ARENA<br><span style="font-size:.5em">Ninguém sai — é briga até a morte!</span>'
+        : 'LET IT RIP! 🌀', modoAtual === 'caos' ? 2400 : 1500);
       sfxLaunch();
       break;
     case 'estado':
@@ -619,6 +694,7 @@ function pegarNome() {
 }
 $('btn-criar').onclick = () => { audio(); conectar(() => send({ t: 'criar', nome: pegarNome() })); };
 $('btn-bot').onclick = () => { audio(); conectar(() => send({ t: 'criarBot', nome: pegarNome() })); };
+$('btn-caos').onclick = () => { audio(); conectar(() => send({ t: 'criar', nome: pegarNome(), modo: 'caos' })); };
 $('btn-entrar').onclick = () => {
   const cod = $('inp-codigo').value.trim().toUpperCase();
   if (cod.length !== 4) { $('menu-erro').textContent = 'Código deve ter 4 letras/números.'; return; }

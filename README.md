@@ -64,6 +64,17 @@ como oponente; os demais entram como **espectadores** com o mesmo código.
 Para treinar sozinho, use **"Treinar contra Bot"** no menu — o bot monta uma
 combinação aleatória a cada partida e sempre topa revanche.
 
+## Modalidades
+
+| Modo | Beyblades | Ring-out | Objetivo |
+|---|---|---|---|
+| **Duelo** | 2 | Sim, pelos 3 bolsões | 3 pontos |
+| **🔥 CAOS** | 5 | **Impossível** — parede sólida | 2 rodadas vencidas |
+
+No **CAOS** a arena entra sempre cheia: os lugares que sobrarem viram bots.
+Como ninguém é arremessado para fora, é briga até a morte — vence quem ainda
+estiver girando no final. O nome de cada jogador flutua sobre a sua beyblade.
+
 ## Regras (estilo Beyblade Burst)
 
 | Final | Como acontece | Pontos |

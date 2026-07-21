@@ -46,7 +46,8 @@ input:focus { border-color: #4d7fe8; }
 .btn:hover { filter: brightness(1.15); }
 .btn:active { transform: scale(.96); }
 .btn.grande { width: 100%; padding: 14px; font-size: 17px; margin-top: 14px; }
-.btn.bot { background: linear-gradient(135deg, #8e5fd6, #5f3aa0); margin-top: 8px; margin-bottom: 14px; }
+.btn.bot { background: linear-gradient(135deg, #8e5fd6, #5f3aa0); margin-top: 8px; }
+.btn.caos { background: linear-gradient(135deg, #e0452b, #a3241a); margin-top: 8px; margin-bottom: 14px; }
 
 /* estilos de saque */
 #estilos { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
@@ -134,6 +135,18 @@ input:focus { border-color: #4d7fe8; }
 .pips { display: flex; gap: 5px; margin-top: 4px; }
 .pip { width: 14px; height: 14px; border-radius: 50%; background: #1b2338; border: 1px solid var(--borda); }
 .pip.on { background: #f2a93b; box-shadow: 0 0 8px rgba(242,169,59,.7); }
+
+/* CAOS: 5 cards compactos empilhados à esquerda */
+#hud-cards.caos { position: absolute; top: 14px; left: 14px; display: flex; flex-direction: column; gap: 6px; }
+#hud-cards.caos .hud-card {
+  position: static; width: min(210px, 40vw); padding: 6px 9px;
+  border-left-width: 4px; border-left-style: solid;
+}
+#hud-cards.caos .hud-nome { font-size: 12px; margin-bottom: 4px; }
+#hud-cards.caos .barra { height: 7px; margin-bottom: 3px; }
+#hud-cards.caos .pip { width: 10px; height: 10px; }
+.hud-card.fora { opacity: .38; filter: grayscale(.7); }
+.hud-card.fora .hud-nome::after { content: ' 💀'; }
 #hud-tempo {
   position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
   font-size: 20px; font-weight: 800; color: #cfd8ee;

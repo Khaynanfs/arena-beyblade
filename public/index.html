@@ -18,15 +18,17 @@
     <h1>⚡ ARENA BEYBLADE ⚡</h1>
     <p class="sub">Monte sua beyblade, desafie o time e deixe ela girando!</p>
     <input id="inp-nome" maxlength="20" placeholder="Seu nome de Blader">
-    <button id="btn-criar" class="btn grande">Criar sala</button>
+    <button id="btn-criar" class="btn grande">Criar sala (1 × 1)</button>
     <button id="btn-bot" class="btn grande bot">🤖 Treinar contra Bot</button>
+    <button id="btn-caos" class="btn grande caos">🔥 Modo CAOS — 5 na arena</button>
     <div class="linha-entrar">
       <input id="inp-codigo" maxlength="4" placeholder="CÓDIGO">
       <button id="btn-entrar" class="btn">Entrar</button>
     </div>
     <p id="menu-erro" class="erro"></p>
     <div class="regras">
-      <b>Regras (estilo Burst):</b> Spin Finish = 1pt · Ring-Out = 2pts · Burst = 2pts · Vence quem fizer 3 pontos.
+      <b>Duelo (estilo Burst):</b> Spin Finish = 1pt · Ring-Out = 2pts · Burst = 2pts · Vence quem fizer 3 pontos.<br>
+      <b>🔥 CAOS:</b> 5 beyblades juntas e parede sólida — ninguém sai da arena. É briga até a morte: sobra quem girar por último. Vence quem levar 2 rodadas.
     </div>
   </div>
 </div>
@@ -70,18 +72,7 @@
 
 <!-- ===== HUD da batalha ===== -->
 <div id="hud" class="oculto">
-  <div class="hud-card esq" id="card0">
-    <div class="hud-nome"></div>
-    <div class="barra spin"><div class="fill"></div></div>
-    <div class="barra burst"><div class="fill"></div></div>
-    <div class="pips"></div>
-  </div>
-  <div class="hud-card dir" id="card1">
-    <div class="hud-nome"></div>
-    <div class="barra spin"><div class="fill"></div></div>
-    <div class="barra burst"><div class="fill"></div></div>
-    <div class="pips"></div>
-  </div>
+  <div id="hud-cards"></div>
   <div id="hud-tempo"></div>
   <div id="hud-skill">
     <div id="btn-skill"><span id="skill-cd"></span><span id="skill-nome"></span></div>
